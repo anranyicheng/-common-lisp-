@@ -1,0 +1,218 @@
+;一字棋，韩俊刚 著
+
+(defstruct board
+  squares
+  player)
+
+(defvar *board-width* 3)
+(defvar *look-ahead* 3)
+(defvar *min-play* 'o)
+(defvar *max-play* 'x)
+
+(defmacro iterate (name bindings &body body)
+  `(labels ((,name ,(mapcar #'first bindings)
+			  ,@body))
+	 (,name ,@(mapcar #'second bindings))))
+
+(defmacro select(selector-form &rest clauses)
+  (let ((selector (gensym "selector-")))
+	`(let ((,selector ,selector-form))
+	   (cond ,@(mapcar #'(lambda (clause)
+						   `((equal ,(car clause) ,selector)
+							 ,@(cdr clause)))
+					   clauses)))))
+
+(defun opponent(player)
+  (select player
+		  (*min-play* *max-play*)
+		  (*max-play* *min-play*)
+		  ('t 'y)
+		  ('j 'p)
+		  (nil nil)))
+(defun rank-board(board)
+  (funcall (if (eq (board-player board ) *min-play*)
+			   #'+
+			   #'-)
+		   (apply #'+ (mapcar #'(lambda (sequence)
+								  (rank-possible-win board sequence))
+							  (possible-tic-tac-toe-wins
+							   *board-width*)))))
+
+(defun enumerate(start increment count)
+  (do ((n start (+ n increment))
+	   (l nil (cons n l))
+	   (i count (1- i)))
+	  ((= i 0 ) (nreverse l))))
+
+(defun possible-tic-tac-toe-wins (*board-width*)
+  (append (mapcar #'(lambda (n)
+					  (enumerate n  1 *board-width*))
+				  (enumerate 0 *board-width* *board-width*))
+		  (mapcar #'(lambda (n)
+					  (enumerate n *board-width* *board-width*))
+				  (enumerate 0 1 *board-width*))
+		  (list (enumerate 0 (1+ *board-width*) *board-width*)
+				(enumerate (1- *board-width*)
+						   (1- *board-width*)
+						   *board-width*))))
+
+(defun winning-score (board)
+  (length (board-squares board)))
+
+(defun rank-possible-win(board squares)
+  (iterate loopy ((rest squares)
+				  (number-of-occupied-squares 0)
+				  (no-opponents? t))
+		   (if (null rest)
+			   (if no-opponents?
+				   (if(= number-of-occupied-squares *board-width*)
+					  (winning-score board)
+					  number-of-occupied-squares)
+				   0)
+			   (let ((square (svref (board-squares board)
+									 (car rest))))
+				 (loopy (cdr rest )
+					(+ number-of-occupied-squares 
+					   (if (eq square (opponent (board-player board )))
+						   1
+						   0))
+					(and no-opponents? (not (eq square (board-player board)))))))))
+
+(defun make-leaf (node)
+  (make-tree node nil))
+(defun tree-parent(tree)
+  (car tree))
+(defun tree-children(tree)
+  (cdr tree))
+(defun leafp(tree)
+  (null (tree-children tree)))
+
+(defun grow-tree(board depth)
+  (if (= depth 0)
+	  (make-leaf board)
+	  (make-tree board (mapcar #'(lambda (child)
+								   (grow-tree child (1- depth)))
+							   (adjacent-board board)))))
+
+(defun make-tree (root children)
+  (cons root children))
+(defun adjacent-board (board)
+  (if (terminal-board-p board)
+	  nil
+	  (do ((i 0 (1+ i))
+		   (moves nil (if (null (svref (board-squares board) i))
+						  (cons (make-move board i) moves)
+						  moves)))
+		  ((= i (length (board-squares board))) moves))))
+
+(defun make-move(from-board square)
+  (let ((new-squares (make-array (length (board-squares from-board)))))
+	(dotimes (i (length new-squares))
+	  (setf (svref new-squares i)
+			(svref (board-squares from-board) i)))
+	(setf (svref new-squares square)
+		  (board-player from-board))
+
+	(make-board :squares new-squares
+				:player (opponent(board-player from-board)))))
+
+(defun minimax(tree)
+  (if (leafp tree)
+	  (values (rank-board (tree-parent tree))
+			  (tree-parent tree))
+	  (let* ((child-rank (mapcar #'(lambda (subtree)
+									 (minimax subtree))
+								 (tree-children tree)))
+			 (best-rank (apply (if(eq (board-player (tree-parent tree)) *min-play*)
+								  #'min
+								  #'max)
+							   child-rank)))
+		(values best-rank
+				(tree-parent
+				 (position best-rank child-rank ))))))
+
+(defun terminal-board-p(board)
+  (print "terminal-board-p")
+	(or (winning-board-p board)
+		(if(position nil (board-squares board))
+		   nil
+		   :tie)))
+(defun winning-board-p(board)
+  (print "winning-board-p")
+	(dolist (possile-win (possible-tic-tac-toe-wins *board-width*))
+	  (iterate loopy ((rest (cdr possile-win))
+					  (player (svref (board-squares board)
+									 (car possile-win))))
+		(if (null rest)
+			(unless (null player)
+			  (return-from winning-board-p player))
+			(loopy (cdr rest)
+			   (if (eq (svref (board-squares board) (car rest))
+					   player)
+				   player
+				   nil))))))
+
+  (defun main(&optional (first-player *max-play*))
+	(format t
+			"~& the computer will play ~A . You will play ~A~%"
+			*min-play* *max-play*)
+	(let ((initial-board (make-board :squares (make-array (expt *board-width* 2))
+									 :player first-player)))
+	 
+	  (iterate loopy ((board initial-board ))
+		(print-board board)
+		(let ((board-status (terminal-board-p board)))
+		  (print 1211)
+		  (select  board-status
+				   (*min-play* (format t "the computer wins.~%"))
+				   (*max-play* (format t "You wins.~%"))
+				   (:tie (format t "the game draw.~%"))
+				   (nil (loopy (if (eq(board-player board)
+									  *min-play*)
+								   (progn(print 12341234)
+										 (computer-move board))
+								   (progn
+									 (print 0000000)
+									 (human-move board ))))))
+		  (print "ajklsdaflsdhfjkl")))))
+
+(defun computer-move(board)
+  (format t "computer move searching ....~%")
+  (let ((game-tree(grow-tree board *look-ahead*)))
+	(multiple-value-bind (rank board)
+		(minimax game-tree)
+	  (declare (ignore rank))
+	  (format t  "done :~%")
+	  board)))
+
+
+(defun human-move(board)
+  (format t "Your move :Please enter the number of a square:~%")
+  (let ((squares(read *standard-input* )))
+	(if (null (svref (board-squares board) squares))
+		(progn
+		  (setf (svref (board-squares board) squares)
+				*max-play*)
+		  (setf (board-player board)
+				(opponent (board-player board )))
+		  board)
+		(progn
+		  (format t "Square ~A is occupied. Try again.:~%" squares)
+		  (human-move board)))))
+
+(defun print-board(board)
+  (labels ((divider()
+			 (dotimes (i  *board-width* (format t "\\~%"))
+			   (format t "\\--"))))
+	(terpri)
+	(divider)
+	(dotimes (i (length(board-squares board)))
+	  (let ((square (svref (board-squares board ) i)))
+		(format t "\\ ~A" (if(null square )
+						   "   "
+						   square)))
+	  (when (= (mod (1+ i ) *board-width*) 0)
+		(format t "\\~%")
+		(divider)))))
+		  
+		
